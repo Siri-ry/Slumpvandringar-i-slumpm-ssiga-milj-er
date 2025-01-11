@@ -1,0 +1,213 @@
+### 1D ###
+
+import numpy as np
+from numba import jit, prange
+from tqdm import tqdm
+
+@jit(nopython=True, parallel=True)
+def simulera_slumpvandring(antal_simuleringar, antal_steg, p_höger, p_vänster, miljötyp):
+   
+    total_slutpositionshastighet = 0.0
+    total_medelavstånd = 0.0
+    total_antal_återkomster = 0
+
+    for simulering in prange(antal_simuleringar):
+        position = 0
+        återkommit_till_ursprung = False
+        summa_avstånd = 0.0
+
+        for i in range(antal_steg):
+            if miljötyp == 'dynamisk':
+                # Dynamiska sannolikheter (uppdateras vid varje steg)
+                p_h = p_höger[i]
+                p_v = p_vänster[i]
+            elif miljötyp == 'statisk':
+                # Statisk slumpmässig miljö
+                p_h = p_höger[position % len(p_höger)]
+                p_v = p_vänster[position % len(p_vänster)]
+            else:  # Icke-slumpmässig miljö
+                p_h = p_höger[0]
+                p_v = p_vänster[0]
+
+            # Rörelseriktning
+            steg = -1 if np.random.rand() < p_v else 1
+            position += steg
+            summa_avstånd += abs(position)
+
+            # Kontroll av återkomst till ursprungspunkten
+            if position == 0 and not återkommit_till_ursprung:
+                återkommit_till_ursprung = True
+                total_antal_återkomster += 1
+
+        # Sammanställning av resultat
+        total_slutpositionshastighet += abs(position) / antal_steg
+        total_medelavstånd += summa_avstånd / antal_steg
+
+    medel_slutpositionshastighet = total_slutpositionshastighet / antal_simuleringar
+    medel_medelavstånd = total_medelavstånd / antal_simuleringar
+    återkomstfrekvens = total_antal_återkomster / antal_simuleringar
+
+    return medel_slutpositionshastighet, medel_medelavstånd, återkomstfrekvens
+
+
+# Parameterinställningar
+antal_simuleringar = 10000
+antal_steg = 100000
+delta = 0.1  # Slumpmässig variation kring 0.1
+förskjutningsnivåer = np.linspace(0, 1, 5)  # Förskjutningsnivåer [0, 0.25, 0.5, 0.75, 1]
+miljötyper = ['icke_slumpmässig', 'statisk', 'dynamisk']
+linjelängd = 10000  # Antal positioner 
+
+resultat = {}
+
+# Simuleringar för varje miljötyp och förskjutningsnivå
+for miljötyp in tqdm(miljötyper, desc="Miljötyper"):
+    resultat[miljötyp] = {}
+    for förskjutning in tqdm(förskjutningsnivåer, desc=f"Förskjutningsnivåer ({miljötyp})", leave=False):
+        # Klippning av sannolikheter baserat på förskjutningsnivå
+        min_p = max(0.0, 0.5 - förskjutning / 2 - delta)
+        max_p = min(1.0, 0.5 + förskjutning / 2 + delta)
+
+        if miljötyp == 'dynamisk':
+            # Dynamisk slumpmässig miljö
+            p_höger = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, antal_steg), min_p, max_p)
+            p_vänster = 1 - p_höger
+        elif miljötyp == 'statisk':
+            # Statisk slumpmässig miljö
+            p_höger = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, linjelängd), min_p, max_p)
+            p_vänster = 1 - p_höger
+        else:  # Icke-slumpmässig miljö
+            p_höger = np.array([0.5 + förskjutning / 2])
+            p_vänster = np.array([0.5 - förskjutning / 2])
+
+        # Simulering
+        resultat[miljötyp][förskjutning] = simulera_slumpvandring(
+            antal_simuleringar, antal_steg, p_höger, p_vänster, miljötyp
+        )
+
+# Resultat
+print("\nResultat:")
+for miljötyp, miljöresultat in resultat.items():
+    print(f"\nMiljötyp: {miljötyp}")
+    for förskjutning, metriker in miljöresultat.items():
+        print(f"  Förskjutning: {förskjutning:.2f} | "
+              f"Slutpositionshastighet: {metriker[0]:.4f} | "
+              f"Medelavstånd: {metriker[1]:.4f} | "
+              f"Återkomstfrekvens: {metriker[2]:.4f}")
+
+
+
+### 2D ###
+
+@jit(nopython=True, parallel=True)
+def simulera_slumpvandring_2d(antal_simuleringar, antal_steg, p_höger, p_vänster, p_upp, p_ned, miljötyp):
+    
+    total_slutpositionshastighet = 0.0
+    total_medelavstånd = 0.0
+    total_antal_återkomster = 0
+
+    for simulering in prange(antal_simuleringar):
+        position = np.array([0, 0])  
+        återkommit_till_ursprung = False
+        summa_avstånd = 0.0
+
+        for i in range(antal_steg):
+            if miljötyp == 'dynamisk':
+                # Dynamiska sannolikheter (uppdateras vid varje steg)
+                p_h = p_höger[i]
+                p_v = p_vänster[i]
+                p_u = p_upp[i]
+                p_n = p_ned[i]
+            elif miljötyp == 'statisk':
+                # Statisk slumpmässig miljö
+                index = (position[0] + position[1]) % len(p_höger)
+                p_h = p_höger[index]
+                p_v = p_vänster[index]
+                p_u = p_upp[index]
+                p_n = p_ned[index]
+            else:  # Icke-slumpmässig miljö
+                p_h = p_höger[0]
+                p_v = p_vänster[0]
+                p_u = p_upp[0]
+                p_n = p_ned[0]
+
+            # Rörelseriktning
+            r = np.random.rand()
+            if r < p_h:
+                steg = np.array([1, 0])  # Höger
+            elif r < p_h + p_v:
+                steg = np.array([-1, 0])  # Vänster
+            elif r < p_h + p_v + p_u:
+                steg = np.array([0, 1])  # Uppåt
+            else:
+                steg = np.array([0, -1])  # Nedåt
+
+            position += steg
+            summa_avstånd += np.linalg.norm(position)
+
+            # Kontrollera återkomst till ursprungspunkten
+            if np.array_equal(position, np.array([0, 0])) and not återkommit_till_ursprung:
+                återkommit_till_ursprung = True
+                total_antal_återkomster += 1
+
+        # Sammanställning av resultat
+        total_slutpositionshastighet += np.linalg.norm(position) / antal_steg
+        total_medelavstånd += summa_avstånd / antal_steg
+
+    medel_slutpositionshastighet = total_slutpositionshastighet / antal_simuleringar
+    medel_medelavstånd = total_medelavstånd / antal_simuleringar
+    återkomstfrekvens = total_antal_återkomster / antal_simuleringar
+
+    return medel_slutpositionshastighet, medel_medelavstånd, återkomstfrekvens
+
+
+# Parameterinställningar
+antal_simuleringar = 10000
+antal_steg = 100000
+delta = 0.1
+förskjutningsnivåer = np.linspace(0, 1, 5)
+miljötyper = ['icke_slumpmässig', 'statisk', 'dynamisk']
+linjelängd = 10000  
+
+resultat = {}
+
+# Simuleringar för varje miljötyp och förskjutningsnivå
+for miljötyp in tqdm(miljötyper, desc="Miljötyper"):
+    resultat[miljötyp] = {}
+    for förskjutning in tqdm(förskjutningsnivåer, desc=f"Förskjutningsnivåer ({miljötyp})", leave=False):
+        min_p = max(0.0, 0.5 - förskjutning / 2 - delta)
+        max_p = min(1.0, 0.5 + förskjutning / 2 + delta)
+
+        if miljötyp == 'dynamisk':
+            # Dynamisk slumpmässig miljö
+            p_höger = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, antal_steg), min_p, max_p)
+            p_vänster = 1 - p_höger
+            p_upp = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, antal_steg), min_p, max_p)
+            p_ned = 1 - p_upp
+        elif miljötyp == 'statisk':
+            # Statisk slumpmässig miljö
+            p_höger = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, linjelängd), min_p, max_p)
+            p_vänster = 1 - p_höger
+            p_upp = np.clip(0.5 + förskjutning / 2 + np.random.uniform(-delta, delta, linjelängd), min_p, max_p)
+            p_ned = 1 - p_upp
+        else:
+            # Icke-slumpmässig miljö
+            p_höger = np.array([0.5 + förskjutning / 2])
+            p_vänster = np.array([0.5 - förskjutning / 2])
+            p_upp = np.array([0.5 + förskjutning / 2])
+            p_ned = np.array([0.5 - förskjutning / 2])
+
+        # Simulering
+        resultat[miljötyp][förskjutning] = simulera_slumpvandring_2d(
+            antal_simuleringar, antal_steg, p_höger, p_vänster, p_upp, p_ned, miljötyp
+        )
+
+# Resultat
+print("\nResultat:")
+for miljötyp, miljöresultat in resultat.items():
+    print(f"\nMiljötyp: {miljötyp}")
+    for förskjutning, metriker in miljöresultat.items():
+        print(f"  Förskjutning: {förskjutning:.2f} | "
+              f"Slutpositionshastighet: {metriker[0]:.4f} | "
+              f"Medelavstånd: {metriker[1]:.4f} | "
+              f"Återkomstfrekvens: {metriker[2]:.4f}")
